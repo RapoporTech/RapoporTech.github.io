@@ -4,17 +4,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Loading Invitation...</title>
+  <title>Band Schedule - Join the Rhythm</title>
   <style>
     body {
       background-color: #0F172A;
       color: #F8FAFC;
-      font-family: -apple-system,
-        system-ui, sans-serif;
+      font-family: -apple-system, system-ui, sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
-      height: vh;
+      height: 100vh;
       margin: 0;
       text-align: center;
     }
@@ -23,10 +22,10 @@
       background-color: #1E293B;
       padding: 40px;
       border-radius: 24px;
-      max-width: px;
+      max-width: 400px;
       width: 85%;
       border: 1px solid #334155;
-      box-shadow: 0 25px 50px rgba(, 0, 0, 0.5);
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
       opacity: 0;
       transition: opacity 0.5s;
     }
@@ -54,13 +53,16 @@
       background-color: #818CF8;
       color: #0F172A;
       padding: 18px 32px;
-      border-radius: px;
+      border-radius: 12px;
       text-decoration: none;
       font-weight: bold;
       display: block;
-      font-size: px;
+      font-size: 16px;
       transition: 0.2s ease;
       cursor: pointer;
+      border: none;
+      width: 100%;
+      margin-bottom: 12px;
     }
 
     .btn:hover {
@@ -72,7 +74,6 @@
       background-color: transparent;
       color: #818CF8;
       border: 2px solid #818CF8;
-      margin-top: 12px;
     }
 
     .btn-secondary:hover {
@@ -84,113 +85,118 @@
       font-size: 12px;
       color: #475569;
     }
-...
-    <div class="card" id="card">
-      <div class="icon">🎸</div>
-      <h1 id="title">Checking Invite...</h1>
-      <p id="message">Please wait while we verify your invitation.</p>
-      <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
-      <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login to Register</button>
-      <div class="footer" id="footer">Don't have the app? Download it from the store first.</div>
-    </div>
 
-    <script>
-      // CONFIGURATION
-      const SUPABASE_URL = 'https://uqpjlqonxueqxprnyueq.supabase.co';
-      const SUPABASE_ANON_KEY = 'sb_publishable_potjA5ybNYlBBwqasu3MfA_lQTIFj0F';
-      const APP_SCHEME = 'bands-schedule';
-      
-      let supabaseClient;
+    .error {
+      color: #F87171;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
 
-      async function init() {
-        const params = new URLSearchParams(window.location.search);
-        const token = params.get('token');
-        const card = document.getElementById('card');
-        const title = document.getElementById('title');
-        const message = document.getElementById('message');
-        const btn = document.getElementById('action-btn');
-        const loginBtn = document.getElementById('login-btn');
+<body>
+  <div class="card" id="card">
+    <div class="icon" id="main-icon">🎸</div>
+    <h1 id="title">Checking Invite...</h1>
+    <p id="message">Please wait while we verify your invitation.</p>
+    
+    <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
+    <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login with Google</button>
+    
+    <div class="footer" id="footer">Coordinate your band's schedule effortlessly.</div>
+  </div>
 
-        // Fade in
-        requestAnimationFrame(() => card.style.opacity = '1');
+  <script>
+    const SUPABASE_URL = 'https://uqpjlqonxueqxprnyueq.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_potjA5ybNYlBBwqasu3MfA_lQTIFj0F';
+    const APP_SCHEME = 'bands-schedule';
+    
+    let supabaseClient;
 
-        // Init Supabase
-        const { createClient } = supabase;
-        supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      const card = document.getElementById('card');
+      const title = document.getElementById('title');
+      const message = document.getElementById('message');
+      const btn = document.getElementById('action-btn');
+      const loginBtn = document.getElementById('login-btn');
 
-        // Check if coming back from login
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        if (session) {
-          showSuccess("Registered!", "You're now registered. Download the app to manage your schedule!");
-          return;
-        }
+      requestAnimationFrame(() => card.style.opacity = '1');
 
-        if (!token) {
-          showError("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
-          loginBtn.style.display = 'block';
-          return;
-        }
+      const { createClient } = supabase;
+      supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // Call the Secure RPC
-        const {data, error} = await supabaseClient.rpc('get_invite_details', {
-          token_input: token
-        });
-
-        if (error || !data) {
-          console.error(error);
-          showError("Invite Not Found", "This invitation code does not exist.");
-          return;
-        }
-
-        if (!data.is_valid) {
-          showError("Expired", "This invitation has expired.");
-          return;
-        }
-
-        // Success! Render the Band Name
-        document.title = `Join ${data.band_name}`;
-        title.innerText = `Join ${data.band_name}`;
-        message.innerHTML = `You've been invited to join the band on
-        <b>BandSchedule</b>. Tap below to coordinate the rhythm.`;
+      // 1. Handle Auth Callback (Registration)
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        const user = session.user;
+        title.innerText = "Setting up profile...";
         
-        // Set Deep Link
+        // Try to create the profile record in the database
+        try {
+          await supabaseClient.from('profiles').upsert({
+            id: user.id,
+            name: user.user_metadata.full_name || 'New Member'
+          });
+        } catch (e) {
+          console.error("Profile creation error:", e);
+        }
+
+        showStatus("✅ Registered!", "You're all set! Now download the app to join your band and manage the schedule.");
+        document.getElementById('main-icon').innerText = "🤘";
+        return;
+      }
+
+      // 2. Handle Invitation Flow
+      if (!token) {
+        showStatus("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
+        loginBtn.style.display = 'block';
+        return;
+      }
+
+      const { data, error } = await supabaseClient.rpc('get_invite_details', {
+        token_input: token
+      });
+
+      if (error || !data) {
+        showStatus("Invite Not Found", "This invitation code does not exist or has expired.", true);
+        loginBtn.style.display = 'block';
+        return;
+      }
+
+      // Success UI
+      document.title = `Join ${data.band_name}`;
+      title.innerText = `Join ${data.band_name}`;
+      message.innerHTML = `You've been invited to join <b>${data.band_name}</b>.<br><br>If you have the app, tap below. Otherwise, login to register first.`;
+      
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      if (isMobile) {
         btn.href = `${APP_SCHEME}://join/${token}`;
         btn.style.display = 'block';
-        loginBtn.style.display = 'block';
-
-        // Auto-redirect on mobile
-        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-          setTimeout(() => {
-            window.location.href = btn.href;
-          }, 1000);
-        }
+        // Auto-redirect
+        setTimeout(() => { window.location.href = btn.href; }, 1200);
       }
+      
+      loginBtn.style.display = 'block';
+    }
 
-      async function loginWithGoogle() {
-        const { error } = await supabaseClient.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: window.location.origin + window.location.pathname
-          }
-        });
-        if (error) alert(error.message);
-      }
+    async function loginWithGoogle() {
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.href }
+      });
+      if (error) alert(error.message);
+    }
 
-      function showSuccess(head, text) {
-        document.getElementById('title').innerText = head;
-        document.getElementById('message').innerText = text;
-        document.getElementById('action-btn').style.display = 'none';
-        document.getElementById('login-btn').style.display = 'none';
-      }
+    function showStatus(head, text, isError = false) {
+      document.getElementById('title').innerText = head;
+      if (isError) document.getElementById('title').classList.add('error');
+      document.getElementById('message').innerHTML = text;
+      document.getElementById('action-btn').style.display = 'none';
+    }
 
-      function showError(head, text) {
-        document.getElementById('title').innerText = head;
-        document.getElementById('message').innerText = text;
-        document.getElementById('action-btn').style.display = 'none';
-      }
-
-      init();
-    </script>
+    init();
+  </script>
 </body>
-
 </html>
