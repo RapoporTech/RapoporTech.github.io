@@ -113,10 +113,11 @@
       }
 
       // Init Supabase
-      const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { createClient } = supabase;
+      const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       // Call the Secure RPC
-      const {data, error} = await supabase.rpc('get_invite_details', {
+      const {data, error} = await supabaseClient.rpc('get_invite_details', {
         token_input: token
       });
 
