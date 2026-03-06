@@ -164,7 +164,6 @@
 
       const { data: { session } } = await supabaseClient.auth.getSession();
       
-      // If logged in, trigger join process immediately if we have a token
       if (session && inviteToken) {
         joinProcess();
         return;
@@ -212,13 +211,24 @@
         });
 
         if (error) {
-          const errorBody = await error.context.json();
+          // Robustly parse the error body
+          let errorBody = {};
+          if (error.context && typeof error.context.json === 'function') {
+            try {
+              errorBody = await error.context.json();
+            } catch (e) {
+              errorBody = { error: error.message };
+            }
+          } else {
+            errorBody = error.context || { error: error.message };
+          }
+          
           if (errorBody.error === 'NAME_REQUIRED') {
              showUI("Almost Done!", "Please confirm your name to complete the process:");
              document.getElementById('name-input-area').style.display = 'block';
              return;
           }
-          throw error;
+          throw new Error(errorBody.error || error.message || "Failed to join.");
         }
         
         showUI("🤘 Joined Successfully!", `Welcome back, <b>${data.user_name}</b>!<br><br>You've successfully joined <b>${data.band_name}</b>.`);
