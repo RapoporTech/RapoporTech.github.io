@@ -49,6 +49,18 @@
       line-height: 1.5;
     }
 
+    input {
+      background-color: #334155;
+      border: 1px solid #475569;
+      color: white;
+      padding: 14px 20px;
+      border-radius: 12px;
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 16px;
+      font-size: 16px;
+    }
+
     .btn {
       background-color: #818CF8;
       color: #0F172A;
@@ -120,8 +132,13 @@
       <h1 id="title">Band Schedule</h1>
       <p id="message"></p>
       
+      <div id="name-input-area" style="display: none;">
+        <input type="text" id="custom-name-field" placeholder="Enter your full name">
+        <button class="btn" onclick="retryJoin()">Complete Registration</button>
+      </div>
+
       <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
-      <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login to Register & Join</button>
+      <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login to Continue</button>
       
       <div class="footer" id="footer">Coordinate your band's schedule effortlessly.</div>
     </div>
@@ -133,15 +150,12 @@
     const APP_SCHEME = 'bands-schedule';
     
     let supabaseClient;
+    let inviteToken;
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
-      const token = params.get('token');
+      inviteToken = params.get('token');
       const card = document.getElementById('card');
-      const title = document.getElementById('title');
-      const message = document.getElementById('message');
-      const btn = document.getElementById('action-btn');
-      const loginBtn = document.getElementById('login-btn');
 
       requestAnimationFrame(() => card.style.opacity = '1');
 
@@ -150,71 +164,74 @@
 
       const { data: { session } } = await supabaseClient.auth.getSession();
       
-      if (session && token) {
-        const user = session.user;
-        document.getElementById('loading-text').innerText = "Joining your band...";
-        
-        try {
-          // A. Update Profile - Use Google Name
-          const { error: profileErr } = await supabaseClient.from('profiles').upsert({
-            id: user.id,
-            name: user.user_metadata.full_name
-          });
-
-          if (profileErr) throw new Error("Profile error: " + profileErr.message);
-
-          // B. Get Band Details
-          const { data: bandData, error: rpcErr } = await supabaseClient.rpc('get_invite_details', {
-            token_input: token
-          });
-
-          if (rpcErr || !bandData || !bandData.is_valid) {
-             throw new Error("Invitation invalid or expired.");
-          }
-
-          // C. Add to band_members - NO is_admin column per GEMINI.md
-          const { error: joinErr } = await supabaseClient.from('band_members').upsert({
-            band_id: bandData.band_id,
-            profile_id: user.id
-          });
-
-          if (joinErr) throw new Error("Join error: " + joinErr.message);
-          
-          showUI("🤘 Registered & Joined!", `Welcome, <b>${user.user_metadata.full_name}</b>!<br><br>You've successfully joined <b>${bandData.band_name}</b>. Now open the app to see the schedule.`);
-        } catch (e) {
-          console.error(e);
-          showUI("Syncing Issue", e.message + "<br><br>Check the browser console for details.", true);
-        }
+      // If logged in, trigger join process immediately if we have a token
+      if (session && inviteToken) {
+        joinProcess();
         return;
       } else if (session) {
-        showUI("Welcome Back!", `You are registered as <b>${session.user.user_metadata.full_name}</b>. Download the app to manage your bands!`);
+        showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
         return;
       }
 
-      if (!token) {
-        showUI("Band Schedule", "The ultimate coordination tool for bands.");
-        loginBtn.style.display = 'block';
+      if (!inviteToken) {
+        showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
+        document.getElementById('login-btn').style.display = 'block';
         return;
       }
 
+      // Guest UI
       const { data, error } = await supabaseClient.rpc('get_invite_details', {
-        token_input: token
+        token_input: inviteToken
       });
 
       if (error || !data || !data.is_valid) {
         showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
-        loginBtn.style.display = 'block';
+        document.getElementById('login-btn').style.display = 'block';
         return;
       }
 
-      showUI(`Join ${data.band_name}`, `You've been invited to join <b>${data.band_name}</b>.<br><br>Login with Google to register and join the band instantly.`);
+      showUI(`Join ${data.band_name}`, `You've been invited to join <b>${data.band_name}</b>.<br><br>Login with Google to join instantly.`);
       
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (isMobile) {
-        btn.href = `${APP_SCHEME}://join/${token}`;
+        const btn = document.getElementById('action-btn');
+        btn.href = `${APP_SCHEME}://join/${inviteToken}`;
         btn.style.display = 'block';
       }
-      loginBtn.style.display = 'block';
+      document.getElementById('login-btn').style.display = 'block';
+    }
+
+    async function joinProcess(customName = null) {
+      document.getElementById('loading-area').style.display = 'block';
+      document.getElementById('main-content').style.display = 'none';
+      document.getElementById('name-input-area').style.display = 'none';
+
+      try {
+        const { data, error } = await supabaseClient.functions.invoke('join-band', {
+          body: { inviteToken: inviteToken, customName: customName }
+        });
+
+        if (error) {
+          const errorBody = await error.context.json();
+          if (errorBody.error === 'NAME_REQUIRED') {
+             showUI("Almost Done!", "Please confirm your name to complete the process:");
+             document.getElementById('name-input-area').style.display = 'block';
+             return;
+          }
+          throw error;
+        }
+        
+        showUI("🤘 Joined Successfully!", `Welcome back, <b>${data.user_name}</b>!<br><br>You've successfully joined <b>${data.band_name}</b>.`);
+      } catch (e) {
+        console.error(e);
+        showUI("Syncing Issue", e.message || "Failed to process invitation.", true);
+      }
+    }
+
+    function retryJoin() {
+      const name = document.getElementById('custom-name-field').value.trim();
+      if (!name) return alert("Please enter a name.");
+      joinProcess(name);
     }
 
     async function loginWithGoogle() {
