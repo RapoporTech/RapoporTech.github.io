@@ -89,20 +89,42 @@
     .error {
       color: #F87171;
     }
+
+    #loading-spinner {
+      border: 4px solid rgba(255, 255, 255, 0.1);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border-left-color: #818CF8;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
   <div class="card" id="card">
-    <div class="icon" id="main-icon">🎸</div>
-    <h1 id="title">Checking Invite...</h1>
-    <p id="message">Please wait while we verify your invitation.</p>
-    
-    <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
-    <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login with Google</button>
-    
-    <div class="footer" id="footer">Coordinate your band's schedule effortlessly.</div>
+    <div id="loading-area">
+      <div id="loading-spinner"></div>
+      <p>Syncing your rhythm...</p>
+    </div>
+
+    <div id="main-content" style="display: none;">
+      <div class="icon" id="main-icon">🎸</div>
+      <h1 id="title">Band Schedule</h1>
+      <p id="message"></p>
+      
+      <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
+      <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login to Register & Join</button>
+      
+      <div class="footer" id="footer">Coordinate your band's schedule effortlessly.</div>
+    </div>
   </div>
 
   <script>
@@ -120,36 +142,60 @@
       const message = document.getElementById('message');
       const btn = document.getElementById('action-btn');
       const loginBtn = document.getElementById('login-btn');
+      const loadingArea = document.getElementById('loading-area');
+      const mainContent = document.getElementById('main-content');
 
+      // Fade in card
       requestAnimationFrame(() => card.style.opacity = '1');
 
       const { createClient } = supabase;
       supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-      // 1. Handle Auth Callback (Registration)
+      // 1. Handle Auth State
       const { data: { session } } = await supabaseClient.auth.getSession();
-      if (session) {
+      
+      if (session && token) {
+        // USER IS LOGGED IN AND HAS A TOKEN - JOIN THE BAND
         const user = session.user;
-        title.innerText = "Setting up profile...";
         
-        // Try to create the profile record in the database
         try {
+          // A. Update Profile
           await supabaseClient.from('profiles').upsert({
             id: user.id,
             name: user.user_metadata.full_name || 'New Member'
           });
-        } catch (e) {
-          console.error("Profile creation error:", e);
-        }
 
-        showStatus("✅ Registered!", "You're all set! Now download the app to join your band and manage the schedule.");
-        document.getElementById('main-icon').innerText = "🤘";
+          // B. Get Band Details (to get band_id)
+          const { data: bandData } = await supabaseClient.rpc('get_invite_details', {
+            token_input: token
+          });
+
+          if (bandData && bandData.is_valid) {
+            // C. Add to band_members
+            await supabaseClient.from('band_members').upsert({
+              band_id: bandData.band_id,
+              profile_id: user.id,
+              is_admin: false
+            });
+            
+            showUI("🤘 Registered & Joined!", `You've successfully joined <b>${bandData.band_name}</b>! Now open the app to see the schedule.`);
+          } else {
+            showUI("Logged In", "You're registered, but the invitation link is invalid or expired.");
+          }
+        } catch (e) {
+          console.error("Join error:", e);
+          showUI("Error", "Something went wrong while joining the band, but you are registered!");
+        }
+        return;
+      } else if (session) {
+        // Logged in but no token
+        showUI("Welcome!", "You are registered with Band Schedule. Download the app to get started!");
         return;
       }
 
-      // 2. Handle Invitation Flow
+      // 2. Not logged in - Show Invitation
       if (!token) {
-        showStatus("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
+        showUI("Band Schedule", "The ultimate coordination tool for bands.");
         loginBtn.style.display = 'block';
         return;
       }
@@ -158,42 +204,41 @@
         token_input: token
       });
 
-      if (error || !data) {
-        showStatus("Invite Not Found", "This invitation code does not exist or has expired.", true);
+      if (error || !data || !data.is_valid) {
+        showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
         loginBtn.style.display = 'block';
         return;
       }
 
-      // Success UI
+      // Success UI for Guest
       document.title = `Join ${data.band_name}`;
-      title.innerText = `Join ${data.band_name}`;
-      message.innerHTML = `You've been invited to join <b>${data.band_name}</b>.<br><br>If you have the app, tap below. Otherwise, login to register first.`;
+      showUI(`Join ${data.band_name}`, `You've been invited to join <b>${data.band_name}</b>.<br><br>Open the app if you have it, or login to join via web.`);
       
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      
       if (isMobile) {
         btn.href = `${APP_SCHEME}://join/${token}`;
         btn.style.display = 'block';
-        // Auto-redirect
-        setTimeout(() => { window.location.href = btn.href; }, 1200);
       }
-      
       loginBtn.style.display = 'block';
     }
 
     async function loginWithGoogle() {
+      // CRITICAL: We pass the full current URL as the redirect so we don't lose the token!
       const { error } = await supabaseClient.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: window.location.href }
+        options: { 
+          redirectTo: window.location.href 
+        }
       });
       if (error) alert(error.message);
     }
 
-    function showStatus(head, text, isError = false) {
+    function showUI(head, text, isError = false) {
+      document.getElementById('loading-area').style.display = 'none';
+      document.getElementById('main-content').style.display = 'block';
       document.getElementById('title').innerText = head;
       if (isError) document.getElementById('title').classList.add('error');
       document.getElementById('message').innerHTML = text;
-      document.getElementById('action-btn').style.display = 'none';
     }
 
     init();
