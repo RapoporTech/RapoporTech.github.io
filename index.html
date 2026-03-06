@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loading Invitation...</title>
+  <style>
+    body {
+      background-color: #0F172A;
+      color: #F8FAFC;
+      font-family: -apple-system,
+        system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: vh;
+      margin: 0;
+      text-align: center;
+    }
+
+    .card {
+      background-color: #1E293B;
+      padding: 40px;
+      border-radius: 24px;
+      max-width: px;
+      width: 85%;
+      border: 1px solid #334155;
+      box-shadow: 0 25px 50px rgba(, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+
+    .icon {
+      font-size: 56px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      color: #818CF8;
+      margin: 0 0 12px;
+      font-size: 28px;
+      font-weight: 800;
+    }
+
+    p {
+      color: #94A3B8;
+      margin: 0 0 32px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .btn {
+      background-color: #818CF8;
+      color: #0F172A;
+      padding: 18px 32px;
+      border-radius: px;
+      text-decoration: none;
+      font-weight: bold;
+      display: block;
+      font-size: px;
+      transition: 0.2s ease;
+      cursor: pointer;
+    }
+
+    .btn:hover {
+      background-color: #6366F1;
+      transform: translateY(-2px);
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #475569;
+    }
+
+    .error {
+      color: #F87171;
+    }
+  </style>
+  <!-- Load Supabase JS from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+  <div class="card" id="card">
+    <div class="icon">🎸</div>
+    <h1 id="title">Checking Invite...</h1>
+    <p id="message">Please wait while we verify your invitation.</p>
+    <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
+    <div class="footer">Don't have the app? Download it from the store first.</div>
+  </div>
+
+  <script>
+    // CONFIGURATION
+    const SUPABASE_URL = 'https://uqpjlqonxueqxprnyueq.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_potjA5ybNYlBBwqasu3MfA_lQTIFj0F';
+    const APP_SCHEME = 'bands-schedule';
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      const card = document.getElementById('card');
+      const title = document.getElementById('title');
+      const message = document.getElementById('message');
+      const btn = document.getElementById('action-btn');
+
+      // Fade in
+      requestAnimationFrame(() => card.style.opacity = '1');
+
+      if (!token) {
+        showError("Invalid Link", "This invitation link is missing a token.");
+        return;
+      }
+
+      // Init Supabase
+      const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // Call the Secure RPC
+      const {data, error} = await supabase.rpc('get_invite_details', {
+        token_input: token
+      });
+
+      if (error || !data) {
+        console.error(error);
+        showError("Invite Not Found", "This invitation code does not exist.");
+        return;
+      }
+
+      if (!data.is_valid) {
+        showError("Expired", "This invitation has expired.");
+        return;
+      }
+
+      // Success! Render the Band Name
+      document.title = `Join ${data.band_name}`;
+      title.innerText = `Join ${data.band_name}`;
+      message.innerHTML = `You've been invited to join the band on
+      <b>BandSchedule</b>. Tap below to coordinate the rhythm.`;
+      // Set Deep Link
+      btn.href = `${APP_SCHEME}://join/${token}`;
+      btn.style.display = 'block';
+
+      // Auto-redirect on mobile
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        setTimeout(() => {
+          window.location.href = btn.href;
+        }, 1000);
+      }
+    }
+
+    function showError(head, text) {
+      document.getElementById('title').innerText = head;
+      document.getElementById('title').className = "error";
+      document.getElementById('message').innerText = text;
+      document.getElementById('action-btn').style.display = 'none';
+    }
+
+    init();
+  </script>
+</body>
+
+</html>
