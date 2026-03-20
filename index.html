@@ -155,21 +155,9 @@
     let inviteSignature;
     let verifiedBandName;
     let verifiedBandId;
+    let pendingJoin = false;
 
-    async function init() {
-      const params = new URLSearchParams(window.location.search);
-      inviteToken = params.get('invite');
-      inviteExpiry = params.get('exp');
-      inviteSignature = params.get('sig');
-      const card = document.getElementById('card');
-
-      requestAnimationFrame(() => card.style.opacity = '1');
-
-      const { createClient } = supabase;
-      supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      
+    async function handleInviteFlow(session) {
       if (!inviteToken || !inviteExpiry || !inviteSignature) {
         if (session) {
           showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
@@ -197,16 +185,44 @@
           }
         } else {
           showUI("Invite Not Found", verifyResult.data?.error || "This invitation link is invalid or has expired.", true);
-          document.getElementById('login-btn').style.display = 'block';
+          if (!session) document.getElementById('login-btn').style.display = 'block';
         }
       } catch (e) {
         console.error('Verification error:', e);
         showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
-        document.getElementById('login-btn').style.display = 'block';
+        if (!session) document.getElementById('login-btn').style.display = 'block';
       }
     }
 
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      inviteToken = params.get('invite');
+      inviteExpiry = params.get('exp');
+      inviteSignature = params.get('sig');
+      const card = document.getElementById('card');
+
+      requestAnimationFrame(() => card.style.opacity = '1');
+
+      const { createClient } = supabase;
+      supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      
+      // Handle initial session check
+      await handleInviteFlow(session);
+
+      // Listen for auth state changes (handles OAuth callback)
+      supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session && inviteToken && inviteExpiry && inviteSignature) {
+          await handleInviteFlow(session);
+        }
+      });
+    }
+
     async function joinProcess(customName = null) {
+      if (pendingJoin) return;
+      pendingJoin = true;
+      
       document.getElementById('loading-area').style.display = 'block';
       document.getElementById('main-content').style.display = 'none';
       document.getElementById('name-input-area').style.display = 'none';
