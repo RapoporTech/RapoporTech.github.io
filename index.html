@@ -151,10 +151,16 @@
     
     let supabaseClient;
     let inviteToken;
+    let inviteExpiry;
+    let inviteSignature;
+    let verifiedBandName;
+    let verifiedBandId;
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
-      inviteToken = params.get('token');
+      inviteToken = params.get('invite');
+      inviteExpiry = params.get('exp');
+      inviteSignature = params.get('sig');
       const card = document.getElementById('card');
 
       requestAnimationFrame(() => card.style.opacity = '1');
@@ -164,40 +170,40 @@
 
       const { data: { session } } = await supabaseClient.auth.getSession();
       
-      if (session && inviteToken) {
-        joinProcess();
-        return;
-      } else if (session) {
-        showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
-        return;
-      }
-
-      if (!inviteToken) {
-        showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
-        document.getElementById('login-btn').style.display = 'block';
+      if (!inviteToken || !inviteExpiry || !inviteSignature) {
+        if (session) {
+          showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
+        } else {
+          showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
+          document.getElementById('login-btn').style.display = 'block';
+        }
         return;
       }
 
-      // Guest UI
-      const { data, error } = await supabaseClient.rpc('get_invite_details', {
-        token_input: inviteToken
-      });
+      try {
+        const verifyResult = await supabaseClient.functions.invoke('join-from-link', {
+          body: { invite: inviteToken, exp: inviteExpiry, sig: inviteSignature }
+        });
 
-      if (error || !data || !data.is_valid) {
+        if (verifyResult.data?.valid) {
+          verifiedBandName = verifyResult.data.bandName;
+          verifiedBandId = verifyResult.data.bandId;
+          
+          if (session) {
+            joinProcess();
+          } else {
+            showUI(`Join ${verifiedBandName}`, `You've been invited to join <b>${verifiedBandName}</b>.<br><br>Login with Google to join instantly.`);
+            document.getElementById('login-btn').style.display = 'block';
+          }
+        } else {
+          showUI("Invite Not Found", verifyResult.data?.error || "This invitation link is invalid or has expired.", true);
+          document.getElementById('login-btn').style.display = 'block';
+        }
+      } catch (e) {
+        console.error('Verification error:', e);
         showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
         document.getElementById('login-btn').style.display = 'block';
-        return;
       }
-
-      showUI(`Join ${data.band_name}`, `You've been invited to join <b>${data.band_name}</b>.<br><br>Login with Google to join instantly.`);
-      
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile) {
-        const btn = document.getElementById('action-btn');
-        btn.href = `${APP_SCHEME}://join/${inviteToken}`;
-        btn.style.display = 'block';
-      }
-      document.getElementById('login-btn').style.display = 'block';
     }
 
     async function joinProcess(customName = null) {
@@ -211,7 +217,6 @@
         });
 
         if (error) {
-          // Robustly parse the error body
           let errorBody = {};
           if (error.context && typeof error.context.json === 'function') {
             try {
