@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Band Schedule - Join the Rhythm</title>
+  <style>
+    body {
+      background-color: #0F172A;
+      color: #F8FAFC;
+      font-family: -apple-system, system-ui, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      text-align: center;
+    }
+
+    .card {
+      background-color: #1E293B;
+      padding: 40px;
+      border-radius: 24px;
+      max-width: 400px;
+      width: 85%;
+      border: 1px solid #334155;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+
+    .icon {
+      font-size: 56px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      color: #818CF8;
+      margin: 0 0 12px;
+      font-size: 28px;
+      font-weight: 800;
+    }
+
+    p {
+      color: #94A3B8;
+      margin: 0 0 32px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    input {
+      background-color: #334155;
+      border: 1px solid #475569;
+      color: white;
+      padding: 14px 20px;
+      border-radius: 12px;
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 16px;
+      font-size: 16px;
+    }
+
+    .btn {
+      background-color: #818CF8;
+      color: #0F172A;
+      padding: 18px 32px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-weight: bold;
+      display: block;
+      font-size: 16px;
+      transition: 0.2s ease;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .btn:hover {
+      background-color: #6366F1;
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background-color: transparent;
+      color: #818CF8;
+      border: 2px solid #818CF8;
+    }
+
+    .btn-secondary:hover {
+      background-color: rgba(129, 140, 248, 0.1);
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #475569;
+    }
+
+    .error {
+      color: #F87171;
+    }
+
+    #loading-spinner {
+      border: 4px solid rgba(255, 255, 255, 0.1);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border-left-color: #818CF8;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+  <div class="card" id="card">
+    <div id="loading-area">
+      <div id="loading-spinner"></div>
+      <p id="loading-text">Syncing your rhythm...</p>
+    </div>
+
+    <div id="main-content" style="display: none;">
+      <div class="icon" id="main-icon">🎸</div>
+      <h1 id="title">Band Schedule</h1>
+      <p id="message"></p>
+      
+      <div id="name-input-area" style="display: none;">
+        <input type="text" id="custom-name-field" placeholder="Enter your full name">
+        <button class="btn" onclick="retryJoin()">Complete Registration</button>
+      </div>
+
+      <a id="action-btn" href="#" class="btn" style="display: none;">Open in App</a>
+      <button id="login-btn" class="btn btn-secondary" style="display: none;" onclick="loginWithGoogle()">Login to Continue</button>
+      
+      <div class="footer" id="footer">Coordinate your band's schedule effortlessly.</div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://uqpjlqonxueqxprnyueq.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_potjA5ybNYlBBwqasu3MfA_lQTIFj0F';
+    const APP_SCHEME = 'bands-schedule';
+    
+    let supabaseClient;
+    let inviteToken;
+    let inviteExpiry;
+    let inviteSignature;
+    let verifiedBandName;
+    let verifiedBandId;
+
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      inviteToken = params.get('invite');
+      inviteExpiry = params.get('exp');
+      inviteSignature = params.get('sig');
+      const card = document.getElementById('card');
+
+      requestAnimationFrame(() => card.style.opacity = '1');
+
+      const { createClient } = supabase;
+      supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      
+      if (!inviteToken || !inviteExpiry || !inviteSignature) {
+        if (session) {
+          showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
+        } else {
+          showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
+          document.getElementById('login-btn').style.display = 'block';
+        }
+        return;
+      }
+
+      try {
+        const verifyResult = await supabaseClient.functions.invoke('join-from-link', {
+          body: { invite: inviteToken, exp: inviteExpiry, sig: inviteSignature }
+        });
+
+        if (verifyResult.data?.valid) {
+          verifiedBandName = verifyResult.data.bandName;
+          verifiedBandId = verifyResult.data.bandId;
+          
+          if (session) {
+            joinProcess();
+          } else {
+            showUI(`Join ${verifiedBandName}`, `You've been invited to join <b>${verifiedBandName}</b>.<br><br>Login with Google to join instantly.`);
+            document.getElementById('login-btn').style.display = 'block';
+          }
+        } else {
+          showUI("Invite Not Found", verifyResult.data?.error || "This invitation link is invalid or has expired.", true);
+          document.getElementById('login-btn').style.display = 'block';
+        }
+      } catch (e) {
+        console.error('Verification error:', e);
+        showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
+        document.getElementById('login-btn').style.display = 'block';
+      }
+    }
+
+    async function joinProcess(customName = null) {
+      document.getElementById('loading-area').style.display = 'block';
+      document.getElementById('main-content').style.display = 'none';
+      document.getElementById('name-input-area').style.display = 'none';
+
+      try {
+        const { data, error } = await supabaseClient.functions.invoke('join-band', {
+          body: { inviteToken: inviteToken, customName: customName }
+        });
+
+        if (error) {
+          let errorBody = {};
+          if (error.context && typeof error.context.json === 'function') {
+            try {
+              errorBody = await error.context.json();
+            } catch (e) {
+              errorBody = { error: error.message };
+            }
+          } else {
+            errorBody = error.context || { error: error.message };
+          }
+          
+          if (errorBody.error === 'NAME_REQUIRED') {
+             showUI("Almost Done!", "Please confirm your name to complete the process:");
+             document.getElementById('name-input-area').style.display = 'block';
+             return;
+          }
+          throw new Error(errorBody.error || error.message || "Failed to join.");
+        }
+        
+        showUI("🤘 Joined Successfully!", `Welcome back, <b>${data.user_name}</b>!<br><br>You've successfully joined <b>${data.band_name}</b>.`);
+      } catch (e) {
+        console.error(e);
+        showUI("Syncing Issue", e.message || "Failed to process invitation.", true);
+      }
+    }
+
+    function retryJoin() {
+      const name = document.getElementById('custom-name-field').value.trim();
+      if (!name) return alert("Please enter a name.");
+      joinProcess(name);
+    }
+
+    async function loginWithGoogle() {
+      const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.href }
+      });
+      if (error) alert(error.message);
+    }
+
+    function showUI(head, text, isError = false) {
+      document.getElementById('loading-area').style.display = 'none';
+      document.getElementById('main-content').style.display = 'block';
+      document.getElementById('title').innerText = head;
+      if (isError) document.getElementById('title').classList.add('error');
+      document.getElementById('message').innerHTML = text;
+    }
+
+    init();
+  </script>
+</body>
+</html>
