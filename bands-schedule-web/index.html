@@ -117,7 +117,6 @@
       100% { transform: rotate(360deg); }
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 
 <body>
@@ -145,16 +144,55 @@
   </div>
 
   <script>
-    const SUPABASE_URL = 'https://uqpjlqonxueqxprnyueq.supabase.co';
-    const SUPABASE_ANON_KEY = 'sb_publishable_potjA5ybNYlBBwqasu3MfA_lQTIFj0F';
-    const APP_SCHEME = 'bands-schedule';
-    
-    let supabaseClient;
+    const API_URL = 'https://api.rapoportech.com.br';
+
     let inviteToken;
     let inviteExpiry;
     let inviteSignature;
     let verifiedBandName;
-    let verifiedBandId;
+    // Session returned by bands-api in the #fragment after Google login.
+    // Kept only in memory for this page load and revoked after joining.
+    let session = null;
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
+    async function callFunction(name, body, accessToken) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+      const res = await fetch(`${API_URL}/api/functions/${name}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (e) {
+        data = {};
+      }
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    // Reads the session (or login error) from the #fragment and removes it
+    // from the address bar, so the tokens don't stay in the history.
+    function readLoginResult() {
+      const fragment = new URLSearchParams(window.location.hash.slice(1));
+      if (window.location.hash) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+      if (fragment.get('access_token')) {
+        session = {
+          accessToken: fragment.get('access_token'),
+          refreshToken: fragment.get('refresh_token'),
+        };
+        return null;
+      }
+      return fragment.get('error_description') || fragment.get('error');
+    }
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
@@ -165,44 +203,36 @@
 
       requestAnimationFrame(() => card.style.opacity = '1');
 
-      const { createClient } = supabase;
-      supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const loginError = readLoginResult();
 
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      
       if (!inviteToken || !inviteExpiry || !inviteSignature) {
-        if (session) {
-          showUI("Welcome Back!", `You're logged in. Use an invite link to join a band!`);
-        } else {
-          showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.");
-          document.getElementById('login-btn').style.display = 'block';
-        }
+        showUI("Band Schedule", "Connect with your band members and manage your schedule effortlessly.<br><br>Use an invite link to join a band!");
         return;
       }
 
       try {
-        const verifyResult = await supabaseClient.functions.invoke('join-from-link', {
-          body: { invite: inviteToken, exp: inviteExpiry, sig: inviteSignature }
+        const verifyResult = await callFunction('join-from-link', {
+          invite: inviteToken, exp: inviteExpiry, sig: inviteSignature,
         });
 
-        if (verifyResult.data?.valid) {
-          verifiedBandName = verifyResult.data.bandName;
-          verifiedBandId = verifyResult.data.bandId;
-          
-          if (session) {
-            joinProcess();
-          } else {
-            showUI(`Join ${verifiedBandName}`, `You've been invited to join <b>${verifiedBandName}</b>.<br><br>Login with Google to join instantly.`);
-            document.getElementById('login-btn').style.display = 'block';
-          }
+        if (!verifyResult.data?.valid) {
+          showUI("Invite Not Found", escapeHtml(verifyResult.data?.error || "This invitation link is invalid or has expired."), true);
+          return;
+        }
+
+        verifiedBandName = verifyResult.data.bandName;
+
+        if (session) {
+          joinProcess();
         } else {
-          showUI("Invite Not Found", verifyResult.data?.error || "This invitation link is invalid or has expired.", true);
+          let text = `You've been invited to join <b>${escapeHtml(verifiedBandName)}</b>.<br><br>Login with Google to join instantly.`;
+          if (loginError) text += `<br><br><span class="error">Login failed: ${escapeHtml(loginError)}</span>`;
+          showUI(`Join ${verifiedBandName}`, text);
           document.getElementById('login-btn').style.display = 'block';
         }
       } catch (e) {
         console.error('Verification error:', e);
-        showUI("Invite Not Found", "This invitation link is invalid or has expired.", true);
-        document.getElementById('login-btn').style.display = 'block';
+        showUI("Connection Problem", "Could not check this invitation. Please try again in a moment.", true);
       }
     }
 
@@ -210,37 +240,50 @@
       document.getElementById('loading-area').style.display = 'block';
       document.getElementById('main-content').style.display = 'none';
       document.getElementById('name-input-area').style.display = 'none';
+      document.getElementById('login-btn').style.display = 'none';
 
       try {
-        const { data, error } = await supabaseClient.functions.invoke('join-band', {
-          body: { inviteToken: inviteToken, customName: customName }
-        });
+        const { ok, status, data } = await callFunction(
+          'join-band',
+          { inviteToken: inviteToken, customName: customName },
+          session.accessToken,
+        );
 
-        if (error) {
-          let errorBody = {};
-          if (error.context && typeof error.context.json === 'function') {
-            try {
-              errorBody = await error.context.json();
-            } catch (e) {
-              errorBody = { error: error.message };
-            }
-          } else {
-            errorBody = error.context || { error: error.message };
+        if (!ok) {
+          if (data.error === 'NAME_REQUIRED') {
+            showUI("Almost Done!", "Please confirm your name to complete the process:");
+            document.getElementById('name-input-area').style.display = 'block';
+            return;
           }
-          
-          if (errorBody.error === 'NAME_REQUIRED') {
-             showUI("Almost Done!", "Please confirm your name to complete the process:");
-             document.getElementById('name-input-area').style.display = 'block';
-             return;
+          if (status === 401) {
+            session = null;
+            showUI(`Join ${verifiedBandName}`, "Your login has expired. Please login again to join.", true);
+            document.getElementById('login-btn').style.display = 'block';
+            return;
           }
-          throw new Error(errorBody.error || error.message || "Failed to join.");
+          throw new Error(data.error || "Failed to join.");
         }
-        
-        showUI("🤘 Joined Successfully!", `Welcome back, <b>${data.user_name}</b>!<br><br>You've successfully joined <b>${data.band_name}</b>.`);
+
+        showUI("🤘 Joined Successfully!", `Welcome, <b>${escapeHtml(data.user_name)}</b>!<br><br>You've successfully joined <b>${escapeHtml(data.band_name)}</b>.<br><br>Open the Band Schedule app to see your band.`);
+        logout();
       } catch (e) {
         console.error(e);
-        showUI("Syncing Issue", e.message || "Failed to process invitation.", true);
+        showUI("Syncing Issue", escapeHtml(e.message || "Failed to process invitation."), true);
+        logout();
       }
+    }
+
+    // The page only needs the session to join; revoke it right after.
+    function logout() {
+      if (!session?.refreshToken) return;
+      const refreshToken = session.refreshToken;
+      session = null;
+      fetch(`${API_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+        keepalive: true,
+      }).catch(() => {});
     }
 
     function retryJoin() {
@@ -249,19 +292,17 @@
       joinProcess(name);
     }
 
-    async function loginWithGoogle() {
-      const { error } = await supabaseClient.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: window.location.href }
-      });
-      if (error) alert(error.message);
+    function loginWithGoogle() {
+      // Comes back to this same URL (with the invite query) carrying the session in the #fragment.
+      const redirectTo = window.location.origin + window.location.pathname + window.location.search;
+      window.location.href = `${API_URL}/api/auth/google/authorize?redirect_to=${encodeURIComponent(redirectTo)}`;
     }
 
     function showUI(head, text, isError = false) {
       document.getElementById('loading-area').style.display = 'none';
       document.getElementById('main-content').style.display = 'block';
       document.getElementById('title').innerText = head;
-      if (isError) document.getElementById('title').classList.add('error');
+      document.getElementById('title').classList.toggle('error', isError);
       document.getElementById('message').innerHTML = text;
     }
 
